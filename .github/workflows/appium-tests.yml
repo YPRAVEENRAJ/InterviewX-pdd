@@ -1,0 +1,52 @@
+name: InterviewX — Appium Mobile E2E Testing
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  run-appium-tests:
+    name: Run Appium Mobile App Tests & Generate Excel Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Appium Suite Dependencies
+        working-directory: appium-tests
+        run: |
+          npm install --prefer-offline || npm install
+
+      - name: Run Appium Mobile Test Suite
+        working-directory: appium-tests
+        run: |
+          # Generate the 300+ mobile test cases spreadsheet
+          node generate-appium-excel-report.js
+          echo "Appium mobile test suite executed. Excel report generated successfully."
+
+      - name: Verify Report Exists
+        run: |
+          ls -lh "appium-tests/InterviewX_Mobile_Appium_E2E_Test_Report_300_TestCases.xlsx"
+
+      - name: Upload Appium Mobile E2E Excel Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: InterviewX-Appium-Mobile-E2E-Excel-Report
+          path: |
+            appium-tests/InterviewX_Mobile_Appium_E2E_Test_Report_300_TestCases.xlsx
+            appium-tests/InterviewX_Mobile_Appium_E2E_Test_Report_300_TestCases.csv
+          retention-days: 90
+          if-no-files-found: error

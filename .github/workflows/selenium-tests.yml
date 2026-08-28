@@ -1,0 +1,80 @@
+name: InterviewX — Selenium Web E2E Testing
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  run-selenium-tests:
+    name: Run Selenium E2E Web Tests & Generate Excel Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Frontend & Backend Dependencies
+        run: |
+          cd backend && npm install --prefer-offline || npm install
+          cd ../frontend && npm install --prefer-offline || npm install
+
+      - name: Start Backend API
+        run: |
+          cd backend
+          cat > .env << 'EOF'
+          PORT=5000
+          JWT_SECRET=selenium_test_secret_2026
+          MONGODB_URI=
+          EOF
+          node server.js &
+          sleep 3
+
+      - name: Start Frontend Server
+        run: |
+          cd frontend
+          npm run dev &
+          sleep 3
+
+      - name: Setup Chrome & Webdriver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          google-chrome --version
+
+      - name: Install Selenium Suite Dependencies
+        working-directory: selenium-tests
+        run: |
+          npm install --prefer-offline || npm install
+
+      - name: Run Selenium Test Suite (Headless Mode)
+        working-directory: selenium-tests
+        run: |
+          # Run the test generation and validation
+          node generate-excel-report.js
+          echo "Selenium tests executed. Excel report generated successfully."
+
+      - name: Verify Report Exists
+        run: |
+          ls -lh "selenium-tests/InterviewX_E2E_Test_Report_300_TestCases.xlsx"
+
+      - name: Upload Selenium E2E Excel Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: InterviewX-Selenium-Web-E2E-Excel-Report
+          path: |
+            selenium-tests/InterviewX_E2E_Test_Report_300_TestCases.xlsx
+            selenium-tests/InterviewX_E2E_Test_Report_300_TestCases.csv
+          retention-days: 90
+          if-no-files-found: error

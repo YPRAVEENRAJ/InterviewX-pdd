@@ -61,6 +61,8 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
   const [transcript, setTranscript] = useState('');
   const [writtenAnswer, setWrittenAnswer] = useState('');
   const [userAnswers, setUserAnswers] = useState([]);
+  const [lastQuestionTime, setLastQuestionTime] = useState(Date.now());
+
 
   // ─── STRICT PROCTORING TELEMETRY (MAX 1 WARNING ALLOWED) ───
   const [proctorStats, setProctorStats] = useState({
@@ -668,6 +670,66 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
     setValidationError(null);
     const currentQ = questions[questionIndex];
 
+    // ─── 1. SPEECH ANALYTICS ENGINE (Behavioral Rounds) ───
+    let behavioralStats = null;
+    if (isBehavioral) {
+      const words = currentAnswerText.split(/\s+/).filter(Boolean);
+      const wordCount = words.length;
+      
+      const fillerWords = ['um', 'uh', 'like', 'actually', 'basically', 'literally', 'seriously', 'honestly'];
+      let fillerCount = 0;
+      words.forEach(w => {
+        const cleaned = w.toLowerCase().replace(/[^a-z]/g, '');
+        if (fillerWords.includes(cleaned)) fillerCount++;
+      });
+      
+      const phrasesMatches = (currentAnswerText.toLowerCase().match(/you know/g) || []).length;
+      fillerCount += phrasesMatches;
+
+      const elapsedSeconds = Math.max(5, (Date.now() - lastQuestionTime) / 1000);
+      const durationMin = elapsedSeconds / 60;
+      const wpm = Math.round(wordCount / durationMin);
+
+      behavioralStats = {
+        wordCount,
+        fillerCount,
+        wpm: Math.min(220, Math.max(60, wpm)),
+        optimalSpeed: wpm >= 110 && wpm <= 160
+      };
+    }
+
+    // ─── 2. CODE & STATIC ANALYSIS ENGINE (Technical Rounds) ───
+    let technicalStats = null;
+    if (!isBehavioral) {
+      const hasTimeComplexity = /o\(\s*[n1k]|log|n\s*\^|2\s*\^/i.test(currentAnswerText);
+      
+      // Brackets balance verification
+      let balanceScore = 100;
+      const stack = [];
+      const pairs = { '}': '{', ')': '(', ']': '[' };
+      for (let char of currentAnswerText) {
+        if (['{', '(', '['].includes(char)) {
+          stack.push(char);
+        } else if (['}', ')', ']'].includes(char)) {
+          if (stack.pop() !== pairs[char]) {
+            balanceScore = 70;
+          }
+        }
+      }
+      if (stack.length > 0) balanceScore = 70;
+
+      // Anti-pattern detector
+      const hasInfiniteLoop = /while\s*\(\s*true\s*\)/.test(currentAnswerText);
+
+      technicalStats = {
+        hasTimeComplexity,
+        complexityMatch: hasTimeComplexity ? 'Complexity Documented' : 'Missing Big-O Bounds',
+        balanceScore,
+        syntaxValid: balanceScore === 100,
+        antiPatterns: hasInfiniteLoop ? ['Infinite Loop Danger'] : []
+      };
+    }
+
     const answerEntry = {
       questionNumber: questionIndex + 1,
       id: currentQ.id,
@@ -680,7 +742,9 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
       writtenAnswer: !isBehavioral ? currentAnswerText : null,
       userAnswer: currentAnswerText,
       isProvided: true,
-      roundType: config?.interviewType || 'Technical'
+      roundType: config?.interviewType || 'Technical',
+      behavioralStats,
+      technicalStats
     };
 
     const updatedAnswers = [...userAnswers, answerEntry];
@@ -689,6 +753,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
     setTranscript('');
     setWrittenAnswer('');
     setIsListening(false);
+    setLastQuestionTime(Date.now()); // Reset time for next question
 
     if (questionIndex < questions.length - 1) {
       setQuestionIndex(questionIndex + 1);
@@ -700,6 +765,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
       onFinishInterview(updatedAnswers, proctorStats, false);
     }
   };
+
 
   // Early Quit with 0 marks
   const handleConfirmEarlyQuit = () => {

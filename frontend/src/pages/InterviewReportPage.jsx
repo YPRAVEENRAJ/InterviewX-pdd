@@ -327,7 +327,76 @@ export default function InterviewReportPage({ config, userAnswers = [], proctorR
                 </div>
               </div>
 
+              {/* ─── SPEECH & CODE ANALYTICS HUD WIDGETS ─── */}
+              {ans.isProvided && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Behavioral Analytics */}
+                  {isBehavioral && ans.behavioralStats && (
+                    <>
+                      <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-0.5">
+                        <span className="text-[9px] uppercase font-bold text-slate-400">Speech Delivery Speed</span>
+                        <p className="text-sm font-extrabold text-white">{ans.behavioralStats.wpm} WPM</p>
+                        <p className={`text-[10px] font-bold ${ans.behavioralStats.optimalSpeed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {ans.behavioralStats.optimalSpeed ? '✓ Optimal Pacing (110-160)' : '⚠ Pacing too fast or slow'}
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-0.5">
+                        <span className="text-[9px] uppercase font-bold text-slate-400">Filler Word Counter</span>
+                        <p className="text-sm font-extrabold text-white">{ans.behavioralStats.fillerCount} used</p>
+                        <p className={`text-[10px] font-bold ${ans.behavioralStats.fillerCount <= 2 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {ans.behavioralStats.fillerCount <= 2 ? '✓ Clear Delivery' : '⚠ Minimize filler words'}
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-0.5">
+                        <span className="text-[9px] uppercase font-bold text-slate-400">Response Verbosity</span>
+                        <p className="text-sm font-extrabold text-white">{ans.behavioralStats.wordCount} words</p>
+                        <p className="text-[10px] text-slate-400 font-semibold">Structured delivery</p>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Technical/Coding Analytics */}
+                  {!isBehavioral && ans.technicalStats && (
+                    <>
+                      <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-0.5">
+                        <span className="text-[9px] uppercase font-bold text-slate-400">Complexity Analysis</span>
+                        <p className="text-sm font-extrabold text-white">{ans.technicalStats.complexityMatch}</p>
+                        <p className={`text-[10px] font-bold ${ans.technicalStats.hasTimeComplexity ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {ans.technicalStats.hasTimeComplexity ? '✓ Big-O Bounds Mentioned' : '⚠ Specify Big-O complexity'}
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-0.5">
+                        <span className="text-[9px] uppercase font-bold text-slate-400">Syntax Integrity Score</span>
+                        <p className="text-sm font-extrabold text-white">{ans.technicalStats.balanceScore}%</p>
+                        <p className={`text-[10px] font-bold ${ans.technicalStats.syntaxValid ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {ans.technicalStats.syntaxValid ? '✓ Balanced brackets structure' : '⚠ Unbalanced parentheses detected'}
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-0.5">
+                        <span className="text-[9px] uppercase font-bold text-slate-400">Anti-pattern warnings</span>
+                        {ans.technicalStats.antiPatterns.length > 0 ? (
+                          <>
+                            <p className="text-sm font-extrabold text-red-400">⚠ Critical Danger</p>
+                            <p className="text-[10px] text-red-400 font-semibold">{ans.technicalStats.antiPatterns[0]}</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-sm font-extrabold text-emerald-400">✓ Safe Code</p>
+                            <p className="text-[10px] text-slate-400 font-semibold">No dangerous patterns found</p>
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* AI Diagnosis & Feedback */}
+
               <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/20 space-y-2">
                 <span className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider flex items-center space-x-1">
                   <Brain className="w-3.5 h-3.5 text-indigo-400" />

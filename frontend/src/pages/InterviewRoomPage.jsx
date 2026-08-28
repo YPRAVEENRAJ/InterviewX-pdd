@@ -833,12 +833,8 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
   // ═════════════════════════════════════════════════════════════════════════
   if (examStage === 'calibration') {
     return (
-      <div className="max-w-4xl mx-auto px-4 py-8 space-y-8 animate-in fade-in">
+      <div className="max-w-4xl mx-auto px-4 py-8 space-y-6 animate-in fade-in">
         
-        {/* Hidden Elements for Background Vision Analysis */}
-        <video ref={videoRef} autoPlay playsInline muted className="hidden" />
-        <canvas ref={canvasRef} className="hidden" />
-
         {/* Calibration Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-bold border border-indigo-500/20 mb-2">
@@ -849,6 +845,66 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
           <p className="text-xs sm:text-sm text-slate-400 max-w-xl mx-auto">
             Please ensure you are in a completely quiet, private room with no other people. Your webcam and microphone will perform a quick security check before full screen mode is locked.
           </p>
+        </div>
+
+        {/* Live Face & Voice Verification Viewport Box */}
+        <div className="flex flex-col md:flex-row items-center justify-center gap-6 bg-slate-900/60 p-6 rounded-3xl border border-slate-800 shadow-2xl max-w-2xl mx-auto">
+          {/* Live Camera Viewport */}
+          <div className="relative w-full max-w-[280px] h-[210px] rounded-2xl overflow-hidden border-2 border-indigo-500/40 bg-slate-950 flex items-center justify-center shadow-lg shrink-0">
+            <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+            <canvas ref={canvasRef} className="hidden" />
+            
+            {/* Visual status overlay */}
+            <div className={`absolute bottom-3 left-3 right-3 px-3 py-1.5 rounded-xl text-[10px] font-bold text-center border backdrop-blur-md ${
+              faceCheckStatus === 'passed' 
+                ? 'bg-emerald-950/85 border-emerald-500/40 text-emerald-400' 
+                : 'bg-red-950/85 border-red-500/40 text-red-400'
+            }`}>
+              {faceCheckStatus === 'passed' ? '✓ Face Centered & Verified' : '⚠ Align Face to Camera'}
+            </div>
+          </div>
+
+          {/* Real-time Noise & Voice Meter */}
+          <div className="flex-1 w-full space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-1.5">
+                <Mic className="w-4 h-4 text-indigo-400" />
+                <span>Microphone Voice Level</span>
+              </h3>
+              <p className="text-[11px] text-slate-400 font-medium">Speak a few words to test voice response index.</p>
+            </div>
+
+            {/* Visualizer volume bar */}
+            <div className="space-y-2">
+              <div className="h-3 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800 p-0.5 flex">
+                <div 
+                  className={`h-full rounded-full transition-all duration-75 ${
+                    ambientNoiseLevel > 38 
+                      ? 'bg-amber-500 animate-pulse' 
+                      : 'bg-indigo-500'
+                  }`}
+                  style={{ width: `${Math.min(100, (ambientNoiseLevel / 80) * 100)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>0 dB (Silence)</span>
+                <span className={ambientNoiseLevel > 38 ? 'text-amber-400 font-bold' : 'text-slate-300'}>
+                  Current: {ambientNoiseLevel} dB
+                </span>
+                <span>80 dB (Noisy)</span>
+              </div>
+            </div>
+
+            <div className={`p-3 rounded-xl border text-[10px] font-semibold ${
+              audioCheckStatus === 'quiet' 
+                ? 'bg-emerald-950/20 border-emerald-500/20 text-emerald-400' 
+                : 'bg-amber-950/20 border-amber-500/20 text-amber-300'
+            }`}>
+              {audioCheckStatus === 'quiet' 
+                ? '✓ Environment Quiet: Perfect for voice recording.' 
+                : '⚠ Environment Noisy: Please silence background audio.'}
+            </div>
+          </div>
         </div>
 
         {/* Verification Checklist Grid */}

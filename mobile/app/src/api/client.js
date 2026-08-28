@@ -1,5 +1,6 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
 // Expo SDK 54: manifest2 replaces manifest, with fallback to hardcoded IP
@@ -30,7 +31,14 @@ const api = axios.create({
 // Attach JWT token to each request if present
 api.interceptors.request.use(
   async (config) => {
-    const token = await SecureStore.getItemAsync('jwt');
+    let token = null;
+    try {
+      token = await SecureStore.getItemAsync('jwt');
+    } catch {
+      try {
+        token = await AsyncStorage.getItem('jwt');
+      } catch {}
+    }
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -40,3 +48,4 @@ api.interceptors.request.use(
 );
 
 export default api;
+

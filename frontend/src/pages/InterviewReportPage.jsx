@@ -195,18 +195,19 @@ export default function InterviewReportPage({ config, userAnswers = [], proctorR
           <div className="flex items-center space-x-2 text-red-400 font-bold text-sm">
             <AlertTriangle className="w-5 h-5" />
             <span>
-              {proctorReport?.lastViolation 
-                ? `Malpractice Disqualification: ${proctorReport.lastViolation}` 
+              {proctorReport?.terminationReason 
+                ? proctorReport.terminationReason 
                 : 'Exam Terminated Early / Disqualified'}
             </span>
           </div>
-          <p className="text-xs text-slate-300">
+          <p className="text-xs text-slate-300 font-medium leading-relaxed">
             {proctorReport?.lastViolation 
-              ? `Strict proctoring violation detected (${proctorReport.lastViolation}). In accordance with zero-tolerance examination security guidelines, the candidate has been awarded 0 Marks (0% Score) and marked as Disqualified.`
-              : 'This candidate session was ended early. In accordance with examination guidelines, 0 Marks (0% Score) and a "No Hire" rating have been assigned.'}
+              ? `Security Protocol Notice: violation detected (${proctorReport.lastViolation}). In accordance with zero-tolerance examination guidelines, this candidate session has been cancelled with 0 Marks (0% Score).`
+              : 'This candidate assessment session was ended early by request or environment timeout. In accordance with examination guidelines, 0 Marks (0% Score) and a "No Hire" recommendation have been finalized.'}
           </p>
         </div>
       )}
+
 
       {/* AI BACKGROUND PROCTORING AUDIT CARD */}
       <div className="glass-card p-6 rounded-3xl border border-indigo-500/20 space-y-4 bg-slate-950/60">

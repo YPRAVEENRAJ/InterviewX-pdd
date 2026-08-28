@@ -117,7 +117,13 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
         roundType: config?.interviewType || 'Technical'
       }));
 
-      onFinishInterview(zeroAnswers, { ...proctorStats, integrityScore: 0, warningCount: proctorStats.warningCount, isTerminatedEarly: true }, true);
+      onFinishInterview(zeroAnswers, {
+        ...proctorStats,
+        integrityScore: 0,
+        warningCount: proctorStats.warningCount,
+        isTerminatedEarly: true,
+        terminationReason: 'Biometric Disqualification: Exceeded maximum allowed environmental pauses (3 camera face-losses or high background noise alerts).'
+      }, true);
       return;
     }
 
@@ -626,7 +632,13 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
         roundType: config?.interviewType || 'Technical'
       }));
 
-      onFinishInterview(zeroAnswers, { ...proctorStats, integrityScore: 0, warningCount: 3, isTerminatedEarly: true }, true);
+      onFinishInterview(zeroAnswers, {
+        ...proctorStats,
+        integrityScore: 0,
+        warningCount: 3,
+        isTerminatedEarly: true,
+        terminationReason: `Malpractice Disqualification: Exceeded maximum allowed malpractice warnings (3 strikes reached for: ${message}).`
+      }, true);
       return;
     }
 
@@ -847,7 +859,11 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
       roundType: config?.interviewType || 'Technical'
     }));
 
-    onFinishInterview(emptyAnswers, proctorStats, true);
+    onFinishInterview(emptyAnswers, {
+      ...proctorStats,
+      isTerminatedEarly: true,
+      terminationReason: 'Voluntary Self-Quit: The candidate chose to terminate the exam early by clicking the "End Exam" button.'
+    }, true);
   };
 
   const handleResumeExam = () => {

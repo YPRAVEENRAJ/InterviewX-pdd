@@ -55,6 +55,11 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
   const [isDisturbancePaused, setIsDisturbancePaused] = useState(false);
   const [disturbanceReason, setDisturbanceReason] = useState('');
   const [resumeError, setResumeError] = useState(null);
+  const [pauseCount, setPauseCount] = useState(0);
+  const pauseCountRef = useRef(0);
+  const isPausedRef = useRef(false);
+  const [activeWarningModal, setActiveWarningModal] = useState(null);
+
 
   
   // Response text: handles spoken transcript (Behavioral) OR typed text/code (Technical)
@@ -78,6 +83,48 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
   });
 
   const [proctorAlertToast, setProctorAlertToast] = useState(null);
+
+  useEffect(() => {
+    isPausedRef.current = isDisturbancePaused;
+  }, [isDisturbancePaused]);
+
+  const triggerProctorPause = (reason) => {
+    if (isDisturbancePaused || isPausedRef.current) return;
+
+    pauseCountRef.current += 1;
+    const newPauseCount = pauseCountRef.current;
+    setPauseCount(newPauseCount);
+
+    if (newPauseCount >= 3) {
+      // 🛑 3 TIMES FACE/NOISE DETECTED: TERMINATE EXAM WITH 0 MARKS!
+      stopCameraHardware();
+      if (document.fullscreenElement) {
+        try { document.exitFullscreen(); } catch (e) {}
+      }
+
+      const zeroAnswers = questions.map((q, idx) => ({
+        questionNumber: idx + 1,
+        id: q.id,
+        title: q.title,
+        questionText: q.question,
+        keyConcepts: q.keyConcepts,
+        modelAnswer: q.modelAnswer,
+        idealTakeaway: q.idealTakeaway,
+        spokenAnswer: null,
+        writtenAnswer: null,
+        userAnswer: `[EXAM TERMINATED: Exceeded Max 3 Environmental Disturbance Limits (Face/Noise) - 0 Marks Awarded]`,
+        isProvided: false,
+        roundType: config?.interviewType || 'Technical'
+      }));
+
+      onFinishInterview(zeroAnswers, { ...proctorStats, integrityScore: 0, warningCount: proctorStats.warningCount, isTerminatedEarly: true }, true);
+      return;
+    }
+
+    setIsDisturbancePaused(true);
+    setDisturbanceReason(`${reason} (This is environmental alert #${newPauseCount}/3. Reaching 3 alerts will automatically terminate the exam).`);
+  };
+
 
   const isBehavioral = config?.interviewType === 'Behavioral & HR';
   const companyName = config?.company || 'Google';
@@ -334,8 +381,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
               if (examStage === 'exam') {
                 if (average > 38 && !isBehavioral) {
                   // Disturbances / background voices in technical round
-                  setIsDisturbancePaused(true);
-                  setDisturbanceReason('High background noise or secondary voices detected. Please maintain complete silence.');
+                  triggerProctorPause('High background noise or secondary voices detected. Please maintain complete silence.');
                 }
               }
 
@@ -390,10 +436,10 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
               setIsEnvironmentReady(false);
 
               if (examStage === 'exam') {
-                setIsDisturbancePaused(true);
-                setDisturbanceReason('Blank Face or Obscured Camera Detected. Face not visible. Please align your face in front of the camera.');
+                triggerProctorPause('Blank Face or Obscured Camera Detected. Face not visible. Please align your face in front of the camera.');
               }
             } else {
+
               setFaceCheckStatus('passed');
               setFaceCheckMessage('✅ Human Face Verified & Centered');
               setIsEnvironmentReady(true);
@@ -468,40 +514,10 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
 
     // IMMEDIATE TERMINATION WITH 0 MARKS IF CANDIDATE SWITCHES TAB OR MINIMIZES
     const handleImmediateTabDisqualification = (reason) => {
-      stopCameraHardware();
-
-      // Exit fullscreen if still active
-      if (document.fullscreenElement) {
-        try { document.exitFullscreen(); } catch (e) {}
-      }
-
-      // Mark all questions as 0 marks with Malpractice Disqualification
-      const zeroAnswers = questions.map((q, idx) => ({
-        questionNumber: idx + 1,
-        id: q.id,
-        title: q.title,
-        questionText: q.question,
-        keyConcepts: q.keyConcepts,
-        modelAnswer: q.modelAnswer,
-        idealTakeaway: q.idealTakeaway,
-        spokenAnswer: null,
-        writtenAnswer: null,
-        userAnswer: `[DISQUALIFIED FOR MALPRACTICE: ${reason} - 0 Marks Awarded]`,
-        isProvided: false,
-        roundType: config?.interviewType || 'Technical'
-      }));
-
-      const finalProctorStats = {
-        ...proctorStats,
-        integrityScore: 0,
-        tabSwitches: proctorStats.tabSwitches + 1,
-        lastViolation: reason,
-        isTerminatedEarly: true,
-        disqualified: true
-      };
-
-      onFinishInterview(zeroAnswers, finalProctorStats, true);
+      // Trigger malpractice warning (warns up to 2 times, terminates on 3rd)
+      handleStrictMalpracticeWarning(reason);
     };
+
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -548,9 +564,10 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
 
   const handleStrictMalpracticeWarning = (message) => {
     const currentWarnings = proctorStats.warningCount;
+    const newWarnings = currentWarnings + 1;
 
-    if (currentWarnings >= 1) {
-      // 🛑 SECOND VIOLATION: STRICT ZERO TOLERANCE TERMINATION WITH 0 MARKS!
+    if (newWarnings >= 3) {
+      // 🛑 THIRD VIOLATION: TERMINATION WITH 0 MARKS!
       stopCameraHardware();
       if (document.fullscreenElement) {
         try { document.exitFullscreen(); } catch (e) {}
@@ -566,29 +583,31 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
         idealTakeaway: q.idealTakeaway,
         spokenAnswer: null,
         writtenAnswer: null,
-        userAnswer: `[EXAM TERMINATED: Exceeded Max 1 Warning Limit for Malpractice - 0 Marks Awarded]`,
+        userAnswer: `[EXAM TERMINATED: Exceeded Max 2 Warning Limit for Malpractice - 0 Marks Awarded]`,
         isProvided: false,
         roundType: config?.interviewType || 'Technical'
       }));
 
-      onFinishInterview(zeroAnswers, { ...proctorStats, integrityScore: 0, warningCount: 2, isTerminatedEarly: true }, true);
+      onFinishInterview(zeroAnswers, { ...proctorStats, integrityScore: 0, warningCount: 3, isTerminatedEarly: true }, true);
       return;
     }
 
-    // First and only warning
+    // Update proctor stats state
     setProctorStats(prev => ({
       ...prev,
-      warningCount: 1,
-      integrityScore: 65,
+      warningCount: newWarnings,
+      integrityScore: Math.max(10, 100 - (newWarnings * 30)),
       lastViolation: message,
-      gazeStatus: 'Warning 1/1 Issued'
+      gazeStatus: `Warning ${newWarnings}/2 Issued`
     }));
 
-    setProctorAlertToast(`⚠️ FINAL WARNING (1/1): ${message} Next violation will immediately terminate the exam with 0 marks!`);
-    setTimeout(() => {
-      setProctorAlertToast(null);
-    }, 6000);
+    // Trigger Pop-up Modal Warning Alert
+    setActiveWarningModal({
+      count: newWarnings,
+      message: `${newWarnings} warning${newWarnings > 1 ? 's' : ''} noticed or found: ${message} (Limit: 2 warnings maximum. A 3rd infraction will immediately terminate the exam with 0 marks).`
+    });
   };
+
 
   // ─── 5. SPEECH RECOGNITION (Active ONLY in Behavioral & HR Round) ───
   useEffect(() => {
@@ -629,7 +648,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
 
   // Timer countdown (Pauses when disturbance occurs)
   useEffect(() => {
-    if (examStage !== 'exam' || isDisturbancePaused) return;
+    if (examStage !== 'exam' || isDisturbancePaused || activeWarningModal) return;
 
     const timer = setInterval(() => {
       setTimeLeft(prev => {
@@ -646,7 +665,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [userAnswers, proctorStats, examStage, isDisturbancePaused]);
+  }, [userAnswers, proctorStats, examStage, isDisturbancePaused, activeWarningModal]);
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -1001,13 +1020,42 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
         </div>
       )}
 
+      {/* ─── MALPRACTICE WARNING POPUP MODAL ─── */}
+      {activeWarningModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-md animate-in fade-in">
+          <div className="glass-card max-w-md w-full p-6 rounded-3xl border border-red-500 bg-slate-900 text-center space-y-5 shadow-2xl">
+            <div className="w-14 h-14 rounded-2xl bg-red-600/20 text-red-500 flex items-center justify-center mx-auto animate-bounce">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-lg font-extrabold text-white uppercase tracking-wider">Security Warning Intercepted</h3>
+              <p className="text-xs text-slate-300 font-medium leading-relaxed">
+                {activeWarningModal.message}
+              </p>
+              <p className="text-[10px] text-slate-400">
+                Please ensure you remain inside the locked full screen session. Exiting, switching tabs, or looking away from the camera screen will result in immediate disqualification on the third infraction.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setActiveWarningModal(null)}
+              className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow-glow transition-all"
+            >
+              I Understand (OK)
+            </button>
+          </div>
+        </div>
+      )}
+
+
 
       {/* Real-Time Proctoring Alert Toast (Max 1 warning) */}
       {proctorAlertToast && (
         <div className="fixed top-6 right-6 z-50 p-4 rounded-2xl bg-red-950/90 border border-red-500/80 text-red-200 text-xs font-semibold shadow-2xl flex items-center space-x-3 animate-bounce max-w-md">
           <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
           <div>
-            <p className="font-bold text-white">AI Proctor Warning #{proctorStats.warningCount}/1 (STRICT LIMIT)</p>
+            <p className="font-bold text-white">AI Proctor Warning #{proctorStats.warningCount}/2 (STRICT LIMIT)</p>
             <p className="text-[11px] text-red-300">{proctorAlertToast}</p>
           </div>
         </div>
@@ -1112,7 +1160,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
               <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1">
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">Warning Limit</span>
                 <p className={`text-sm font-bold font-mono ${proctorStats.warningCount === 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {proctorStats.warningCount} / 1 Strike Max
+                  {proctorStats.warningCount} / 2 Strike Max
                 </p>
                 <p className="text-[10px] text-slate-500">Zero tolerance</p>
               </div>
@@ -1120,7 +1168,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
               <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1">
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">Tab Switches</span>
                 <p className="text-sm font-bold text-emerald-400">0 (Locked)</p>
-                <p className="text-[10px] text-slate-500">Tab switch = 0 Marks</p>
+                <p className="text-[10px] text-slate-500">Counts as warning</p>
               </div>
 
               <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1">

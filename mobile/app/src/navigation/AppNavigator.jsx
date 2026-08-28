@@ -13,7 +13,6 @@ import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import HomeScreen from '../screens/HomeScreen';
 import InterviewScreen from '../screens/InterviewScreen';
-import CareerScreen from '../screens/CareerScreen';
 import CodingScreen from '../screens/CodingScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import ResumeScreen from '../screens/ResumeScreen';
@@ -41,17 +40,6 @@ function CustomTabBar({ state, descriptors, navigation }) {
           </Text>
         </TouchableOpacity>
 
-        {/* Tab 1: Career Roadmap (Analytics) */}
-        <TouchableOpacity
-          style={styles.tabButton}
-          onPress={() => navigation.navigate('Career')}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.tabIcon, state.index === 1 && styles.tabIconActive]}>
-            📊
-          </Text>
-        </TouchableOpacity>
-
         {/* Center Floating (+) Quick Interview Button */}
         <TouchableOpacity
           style={[styles.centerPlusButton, { backgroundColor: '#ffffff' }]}
@@ -61,24 +49,24 @@ function CustomTabBar({ state, descriptors, navigation }) {
           <Text style={styles.centerPlusText}>+</Text>
         </TouchableOpacity>
 
-        {/* Tab 2: Resume ATS Scanner */}
+        {/* Tab 1: Resume ATS Scanner */}
         <TouchableOpacity
           style={styles.tabButton}
           onPress={() => navigation.navigate('ResumeTab')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.tabIcon, state.index === 2 && styles.tabIconActive]}>
+          <Text style={[styles.tabIcon, state.index === 1 && styles.tabIconActive]}>
             📄
           </Text>
         </TouchableOpacity>
 
-        {/* Tab 3: Coding Practice Arena */}
+        {/* Tab 2: Coding Practice Arena */}
         <TouchableOpacity
           style={styles.tabButton}
           onPress={() => navigation.navigate('Coding')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.tabIcon, state.index === 3 && styles.tabIconActive]}>
+          <Text style={[styles.tabIcon, state.index === 2 && styles.tabIconActive]}>
             💻
           </Text>
         </TouchableOpacity>
@@ -95,7 +83,6 @@ function MainTabs() {
       screenOptions={{ headerShown: false }}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Career" component={CareerScreen} />
       <Tab.Screen name="ResumeTab" component={ResumeScreen} />
       <Tab.Screen name="Coding" component={CodingScreen} />
     </Tab.Navigator>
@@ -139,10 +126,10 @@ export default function AppNavigator() {
             />
             <Stack.Screen name="Resume" component={ResumeScreen} options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="Coding" component={CodingScreen} />
-            <Stack.Screen name="Career" component={CareerScreen} />
             <Stack.Screen name="Home" component={HomeScreen} />
             <Stack.Screen name="Dashboard" component={DashboardScreen} />
           </>
+
         ) : (
           <>
             <Stack.Screen name="Login" component={LoginScreen} />

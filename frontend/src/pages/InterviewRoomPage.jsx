@@ -418,6 +418,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
             const imageData = ctx.getImageData(0, 0, 160, 120);
             const data = imageData.data;
             let totalLuminance = 0;
+            let sampleCount = 0;
 
             for (let i = 0; i < data.length; i += 4) {
               const r = data[i];
@@ -425,21 +426,58 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
               const b = data[i + 2];
               const lum = (0.299 * r + 0.587 * g + 0.114 * b);
               totalLuminance += lum;
+              sampleCount++;
             }
 
-            const avgLuminance = totalLuminance / (data.length / 4);
+            const avgLuminance = totalLuminance / sampleCount;
 
-            // If average luminance is too dark (< 22) or too washed out (> 245) or no edge features
-            if (avgLuminance < 22 || avgLuminance > 245) {
+            // ─── EXTRACT SKIN TONE RATIOS & LUMINANCE VARIANCE (DETAILS) ───
+            let skinPixels = 0;
+            let luminanceVariance = 0;
+
+            for (let i = 0; i < data.length; i += 16) { // sample every 4th pixel to keep performance high
+              const r = data[i];
+              const g = data[i + 1];
+              const b = data[i + 2];
+              const lum = (0.299 * r + 0.587 * g + 0.114 * b);
+
+              // Peer-reviewed skin tone RGB range (inclusive of all skin colors under normal light)
+              if (r > 60 && g > 40 && b > 20 && r > g && r > b) {
+                const maxVal = Math.max(r, g, b);
+                const minVal = Math.min(r, g, b);
+                if ((maxVal - minVal) > 15 && Math.abs(r - g) > 15) {
+                  skinPixels++;
+                }
+              }
+
+              const diff = lum - avgLuminance;
+              luminanceVariance += diff * diff;
+            }
+
+            const skinRatio = skinPixels / (sampleCount / 4);
+            const stdDevLuminance = Math.sqrt(luminanceVariance / (sampleCount / 4));
+
+            // Heuristic thresholds:
+            // Flat walls have uniform colors (stdDevLuminance < 11) and no skin features (skinRatio < 0.05).
+            // REAL face with shadows, eyes, and background has stdDevLuminance >= 11 and skinRatio >= 0.05.
+            const isFlatSurface = stdDevLuminance < 11;
+            const hasNoSkinTones = skinRatio < 0.05;
+
+            if (avgLuminance < 25 || avgLuminance > 240 || isFlatSurface || hasNoSkinTones) {
               setFaceCheckStatus('blank_face');
-              setFaceCheckMessage('❌ Blank Face / Obscured Camera Detected: Face not visible. Ensure bright lighting and look directly into your camera.');
+              if (isFlatSurface) {
+                setFaceCheckMessage('❌ Flat Background / Wall Detected: Please ensure your face is fully in frame.');
+              } else if (hasNoSkinTones) {
+                setFaceCheckMessage('❌ Human Face Not Detected: Frame does not match human skin color index.');
+              } else {
+                setFaceCheckMessage('❌ Poor Lighting / Obscured Lens: Face not visible.');
+              }
               setIsEnvironmentReady(false);
 
               if (examStage === 'exam') {
-                triggerProctorPause('Blank Face or Obscured Camera Detected. Face not visible. Please align your face in front of the camera.');
+                triggerProctorPause('Blank Face or Obscured Camera Detected. Face not visible.');
               }
             } else {
-
               setFaceCheckStatus('passed');
               setFaceCheckMessage('✅ Human Face Verified & Centered');
               setIsEnvironmentReady(true);

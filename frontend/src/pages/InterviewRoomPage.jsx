@@ -54,6 +54,8 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
   // Real-Time Disturbance Auto-Pause
   const [isDisturbancePaused, setIsDisturbancePaused] = useState(false);
   const [disturbanceReason, setDisturbanceReason] = useState('');
+  const [resumeError, setResumeError] = useState(null);
+
   
   // Response text: handles spoken transcript (Behavioral) OR typed text/code (Technical)
   const [transcript, setTranscript] = useState('');
@@ -276,6 +278,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
     let microphoneSource = null;
     let animationFrameId = null;
     let faceCheckInterval = null;
+    let isMounted = true;
 
     async function initHardwareAndCalibrate() {
       try {
@@ -287,6 +290,11 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
           }, 
           audio: true 
         });
+
+        if (!isMounted) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
 
         streamRef.current = stream;
         if (videoRef.current) {
@@ -310,7 +318,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
             const dataArray = new Uint8Array(bufferLength);
 
             const checkAudio = () => {
-              if (!analyserRef.current) return;
+              if (!analyserRef.current || !isMounted) return;
               analyserRef.current.getByteFrequencyData(dataArray);
 
               let sum = 0;
@@ -321,19 +329,11 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
               setAmbientNoiseLevel(Math.round(average));
 
               // DISTURBANCE DETECTION DURING ACTIVE EXAM:
-              // If average volume exceeds 38 (voices or disturbance), trigger pause
               if (examStage === 'exam') {
                 if (average > 38 && !isBehavioral) {
                   // Disturbances / background voices in technical round
                   setIsDisturbancePaused(true);
                   setDisturbanceReason('High background noise or secondary voices detected. Please maintain complete silence.');
-                } else if (isDisturbancePaused && average < 22) {
-                  // Automatically resume when quiet for 1.5 seconds
-                  setTimeout(() => {
-                    if (average < 22) {
-                      setIsDisturbancePaused(false);
-                    }
-                  }, 1200);
                 }
               }
 
@@ -357,7 +357,7 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
 
         // ─── BLANK FACE & BIOMETRIC CHECK ENGINE ───
         faceCheckInterval = setInterval(() => {
-          if (!videoRef.current || !canvasRef.current) return;
+          if (!videoRef.current || !canvasRef.current || !isMounted) return;
           const video = videoRef.current;
           const canvas = canvasRef.current;
           const ctx = canvas.getContext('2d');
@@ -370,7 +370,6 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
             const imageData = ctx.getImageData(0, 0, 160, 120);
             const data = imageData.data;
             let totalLuminance = 0;
-            let edgeContrast = 0;
 
             for (let i = 0; i < data.length; i += 4) {
               const r = data[i];
@@ -387,6 +386,11 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
               setFaceCheckStatus('blank_face');
               setFaceCheckMessage('❌ Blank Face / Obscured Camera Detected: Face not visible. Ensure bright lighting and look directly into your camera.');
               setIsEnvironmentReady(false);
+
+              if (examStage === 'exam') {
+                setIsDisturbancePaused(true);
+                setDisturbanceReason('Blank Face or Obscured Camera Detected. Face not visible. Please align your face in front of the camera.');
+              }
             } else {
               setFaceCheckStatus('passed');
               setFaceCheckMessage('✅ Human Face Verified & Centered');
@@ -405,16 +409,22 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
     initHardwareAndCalibrate();
 
     return () => {
+      isMounted = false;
       if (faceCheckInterval) clearInterval(faceCheckInterval);
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       if (audioContextRef.current) {
         try { audioContextRef.current.close(); } catch (e) {}
       }
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current.getTracks().forEach(t => {
+          t.stop();
+          t.enabled = false;
+        });
+        streamRef.current = null;
       }
     };
   }, [examStage]);
+
 
   // Clean hardware stopper
   const stopCameraHardware = () => {
@@ -717,6 +727,22 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
     onFinishInterview(emptyAnswers, proctorStats, true);
   };
 
+  const handleResumeExam = () => {
+    // Re-verify face status and ambient noise level
+    if (faceCheckStatus !== 'passed') {
+      setResumeError('❌ Cannot resume exam: Face is still not detected or camera is obscured. Please align your face directly in front of the camera.');
+      return;
+    }
+    if (ambientNoiseLevel > 35) {
+      setResumeError(`❌ Cannot resume exam: Ambient room is too noisy (Current level: ${ambientNoiseLevel} dB). Please restore complete silence.`);
+      return;
+    }
+
+    setResumeError(null);
+    setIsDisturbancePaused(false);
+  };
+
+
   // ═════════════════════════════════════════════════════════════════════════
   // STAGE 1: PRE-EXAM BIOMETRIC & ENVIRONMENT CALIBRATION (Full Screen Gate)
   // ═════════════════════════════════════════════════════════════════════════
@@ -861,23 +887,54 @@ export default function InterviewRoomPage({ config, onFinishInterview }) {
             <div className="space-y-2">
               <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 text-xs font-bold border border-amber-500/20">
                 <VolumeX className="w-4 h-4" />
-                <span>Environmental Disturbance Detected</span>
+                <span>Malpractice & Disturbance Safeguard</span>
               </div>
-              <h3 className="text-xl font-extrabold text-white">Examination Automatically Paused</h3>
+              <h3 className="text-xl font-extrabold text-white">Examination Paused</h3>
               <p className="text-xs text-slate-300 leading-relaxed font-medium">
                 {disturbanceReason}
               </p>
               <p className="text-[11px] text-slate-400">
-                The countdown timer is currently paused. Please maintain total silence and ensure no one is speaking around you. The exam will <strong className="text-emerald-400">automatically resume</strong> once silence is restored.
+                The countdown timer is currently paused. Please resolve the issue, align your face with the camera, and ensure complete silence in the room before continuing.
               </p>
             </div>
 
-            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-amber-300">
-              Ambient Noise Level: {ambientNoiseLevel} dB (Waiting for silence &lt; 22 dB...)
+            {/* Check indicators inside the pause modal */}
+            <div className="space-y-2 text-left bg-slate-950 p-4 rounded-2xl border border-slate-800">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-semibold">1. Face Detection Status:</span>
+                <span className={`font-bold ${faceCheckStatus === 'passed' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {faceCheckStatus === 'passed' ? '✅ Face Verified' : '❌ Face Not Detected'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-semibold">2. Surrounding Noise Level:</span>
+                <span className={`font-bold ${ambientNoiseLevel <= 30 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {ambientNoiseLevel <= 30 ? '✅ Quiet' : '❌ Noisy'} ({ambientNoiseLevel} dB)
+                </span>
+              </div>
+            </div>
+
+            {/* Resume Validation Error Message */}
+            {resumeError && (
+              <div className="p-3.5 rounded-xl bg-red-950/80 border border-red-500/50 text-red-200 text-xs font-semibold text-left">
+                {resumeError}
+              </div>
+            )}
+
+            {/* Resume Action Buttons */}
+            <div className="flex items-center space-x-3 pt-2">
+              <button
+                onClick={handleResumeExam}
+                className="flex-1 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-glow transition-all flex items-center justify-center space-x-2"
+              >
+                <Play className="w-4 h-4" />
+                <span>Verify & Resume Exam</span>
+              </button>
             </div>
           </div>
         </div>
       )}
+
 
       {/* Real-Time Proctoring Alert Toast (Max 1 warning) */}
       {proctorAlertToast && (

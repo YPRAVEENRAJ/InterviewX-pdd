@@ -1,0 +1,18 @@
+{
+  "name": "interviewx-appium-tests",
+  "version": "1.0.0",
+  "description": "Appium Mobile Automation E2E Test Suite for InterviewX iOS & Android Mobile App",
+  "main": "tests/mobile-app-tests.js",
+  "scripts": {
+    "test:mobile": "node tests/mobile-app-tests.js",
+    "generate:report": "node generate-appium-excel-report.js"
+  },
+  "keywords": ["appium", "mobile-testing", "automation", "android", "ios", "react-native", "interviewx"],
+  "author": "Praveen Raj",
+  "license": "MIT",
+  "dependencies": {
+    "webdriverio": "^8.32.0",
+    "appium": "^2.5.1",
+    "xlsx": "^0.18.5"
+  }
+}

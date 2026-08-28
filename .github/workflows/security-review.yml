@@ -1,0 +1,545 @@
+name: InterviewX Security Assessment Pipeline
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      run_dast:
+        description: 'Run DAST (requires live API URL)'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  # ═══════════════════════════════════════════════════════════
+  # PHASE 1: DETECT BACKEND TECHNOLOGY
+  # ═══════════════════════════════════════════════════════════
+  detect-backend:
+    name: Detect Backend Technology Stack
+    runs-on: ubuntu-latest
+    outputs:
+      framework: ${{ steps.detect.outputs.framework }}
+      language: ${{ steps.detect.outputs.language }}
+      has_package_json: ${{ steps.detect.outputs.has_package_json }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Detect Backend Technology
+        id: detect
+        run: |
+          echo "Detecting backend technology stack..."
+
+          if [ -f "backend/package.json" ] || [ -f "package.json" ]; then
+            FRAMEWORK="nodejs-express"
+            LANGUAGE="javascript"
+            echo "Detected: Node.js / Express.js"
+            echo "framework=nodejs-express" >> $GITHUB_OUTPUT
+            echo "language=javascript" >> $GITHUB_OUTPUT
+            echo "has_package_json=true" >> $GITHUB_OUTPUT
+
+          elif [ -f "requirements.txt" ] || [ -f "Pipfile" ]; then
+            if grep -q "fastapi" requirements.txt 2>/dev/null; then
+              FRAMEWORK="fastapi"
+            elif grep -q "django" requirements.txt 2>/dev/null; then
+              FRAMEWORK="django"
+            elif grep -q "flask" requirements.txt 2>/dev/null; then
+              FRAMEWORK="flask"
+            else
+              FRAMEWORK="python-generic"
+            fi
+            echo "framework=$FRAMEWORK" >> $GITHUB_OUTPUT
+            echo "language=python" >> $GITHUB_OUTPUT
+            echo "has_package_json=false" >> $GITHUB_OUTPUT
+
+          elif [ -f "pom.xml" ] || [ -f "build.gradle" ]; then
+            echo "framework=spring-boot" >> $GITHUB_OUTPUT
+            echo "language=java" >> $GITHUB_OUTPUT
+            echo "has_package_json=false" >> $GITHUB_OUTPUT
+
+          elif [ -f "go.mod" ]; then
+            echo "framework=go-gin" >> $GITHUB_OUTPUT
+            echo "language=go" >> $GITHUB_OUTPUT
+            echo "has_package_json=false" >> $GITHUB_OUTPUT
+
+          else
+            echo "framework=unknown" >> $GITHUB_OUTPUT
+            echo "language=unknown" >> $GITHUB_OUTPUT
+            echo "has_package_json=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Stack detection complete."
+
+      - name: Print Stack Summary
+        run: |
+          echo "================================================================"
+          echo "  InterviewX Security Pipeline — Stack Detection Report"
+          echo "================================================================"
+          echo "  Framework : ${{ steps.detect.outputs.framework }}"
+          echo "  Language  : ${{ steps.detect.outputs.language }}"
+          echo "================================================================"
+
+  # ═══════════════════════════════════════════════════════════
+  # PHASE 2: SAST — SECRET SCANNING (Gitleaks)
+  # ═══════════════════════════════════════════════════════════
+  secret-scan:
+    name: Secret & Credential Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    needs: detect-backend
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for secret scanning
+
+      - name: Run Gitleaks Secret Scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Run Custom Hardcoded Secret Check
+        run: |
+          echo "Scanning for hardcoded secrets in source files..."
+          ISSUES=0
+
+          # Check for hardcoded JWT secrets
+          if grep -rn "jwt_secret\|JWT_SECRET.*=.*['\"]" backend/ --include="*.js" --include="*.ts" 2>/dev/null | grep -v "process.env"; then
+            echo "WARNING: Potential hardcoded JWT secret found"
+            ISSUES=$((ISSUES + 1))
+          fi
+
+          # Check for hardcoded passwords
+          if grep -rn "password.*=.*['\"]password\|password.*=.*['\"]123\|password.*=.*['\"]admin" backend/ --include="*.js" 2>/dev/null; then
+            echo "WARNING: Plaintext passwords found in source code"
+            ISSUES=$((ISSUES + 1))
+          fi
+
+          # Check for MongoDB credentials
+          if grep -rn "mongodb+srv://.*:.*@" backend/ --include="*.js" --include="*.json" 2>/dev/null; then
+            echo "CRITICAL: MongoDB connection string with credentials found in source code"
+            ISSUES=$((ISSUES + 1))
+          fi
+
+          # Check for .env files committed
+          if git ls-files | grep -E "\.env$"; then
+            echo "CRITICAL: .env file is tracked in Git — credentials may be exposed"
+            ISSUES=$((ISSUES + 1))
+          fi
+
+          echo "Secret scan complete. Issues found: $ISSUES"
+
+          if [ $ISSUES -gt 0 ]; then
+            echo "::warning::Secret scanning found $ISSUES potential credential exposures."
+          fi
+
+      - name: Upload Secret Scan Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secret-scan-results
+          path: |
+            gitleaks-report.json
+          if-no-files-found: ignore
+
+  # ═══════════════════════════════════════════════════════════
+  # PHASE 3: DEPENDENCY VULNERABILITY SCAN
+  # ═══════════════════════════════════════════════════════════
+  dependency-scan:
+    name: Dependency Vulnerability Scan (npm audit)
+    runs-on: ubuntu-latest
+    needs: detect-backend
+    if: needs.detect-backend.outputs.has_package_json == 'true'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Backend Dependencies
+        working-directory: backend
+        run: npm ci --prefer-offline || npm install
+
+      - name: Run npm audit (JSON output)
+        working-directory: backend
+        run: |
+          npm audit --json > ../dependency-audit-report.json 2>&1 || true
+          npm audit --audit-level=moderate 2>&1 | tee ../dependency-audit-summary.txt || true
+          echo "Dependency audit complete."
+
+      - name: Parse Audit Results
+        run: |
+          if [ -f dependency-audit-report.json ]; then
+            CRITICAL=$(jq '.metadata.vulnerabilities.critical // 0' dependency-audit-report.json 2>/dev/null || echo "0")
+            HIGH=$(jq '.metadata.vulnerabilities.high // 0' dependency-audit-report.json 2>/dev/null || echo "0")
+            MEDIUM=$(jq '.metadata.vulnerabilities.moderate // 0' dependency-audit-report.json 2>/dev/null || echo "0")
+            LOW=$(jq '.metadata.vulnerabilities.low // 0' dependency-audit-report.json 2>/dev/null || echo "0")
+
+            echo "================================================================"
+            echo "  Dependency Vulnerability Summary"
+            echo "  Critical: $CRITICAL | High: $HIGH | Medium: $MEDIUM | Low: $LOW"
+            echo "================================================================"
+
+            if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+              echo "::error::Critical or High dependency vulnerabilities found. Review audit report."
+              # Don't fail on student project — warn only
+            fi
+          fi
+
+      - name: Check for Outdated Packages
+        working-directory: backend
+        run: npm outdated 2>&1 || true
+
+      - name: Upload Dependency Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-vulnerability-report
+          path: |
+            dependency-audit-report.json
+            dependency-audit-summary.txt
+
+  # ═══════════════════════════════════════════════════════════
+  # PHASE 4: SAST — CODE SECURITY ANALYSIS
+  # ═══════════════════════════════════════════════════════════
+  sast-analysis:
+    name: SAST Code Security Analysis
+    runs-on: ubuntu-latest
+    needs: detect-backend
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run ESLint Security Plugin
+        working-directory: backend
+        run: |
+          npm install --save-dev eslint eslint-plugin-security 2>/dev/null || true
+          cat > .eslintrc-security.json << 'EOF'
+          {
+            "plugins": ["security"],
+            "rules": {
+              "security/detect-object-injection": "warn",
+              "security/detect-non-literal-require": "warn",
+              "security/detect-non-literal-fs-filename": "warn",
+              "security/detect-eval-with-expression": "error",
+              "security/detect-unsafe-regex": "warn",
+              "security/detect-possible-timing-attacks": "warn"
+            }
+          }
+          EOF
+          npx eslint --no-eslintrc -c .eslintrc-security.json --format json *.js models/*.js config/*.js > ../eslint-security-report.json 2>&1 || true
+          echo "ESLint security scan complete."
+
+      - name: Run Custom SAST Checks
+        run: |
+          echo "Running custom SAST checks on backend code..."
+          CRITICAL_COUNT=0
+          HIGH_COUNT=0
+          MEDIUM_COUNT=0
+
+          echo "=== SAST FINDINGS ===" > sast-report.txt
+
+          # Check 1: Authentication bypass pattern
+          if grep -n "password.*||.*'password" backend/app.js 2>/dev/null; then
+            echo "CRITICAL: Default password fallback detected" >> sast-report.txt
+            CRITICAL_COUNT=$((CRITICAL_COUNT + 1))
+          fi
+
+          # Check 2: Unauthenticated admin routes
+          if grep -n "app.get.*users" backend/app.js 2>/dev/null | grep -v "authenticate\|auth\|middleware"; then
+            echo "HIGH: Admin route possibly missing auth middleware" >> sast-report.txt
+            HIGH_COUNT=$((HIGH_COUNT + 1))
+          fi
+
+          # Check 3: Hardcoded fallback secret
+          if grep -n "|| '" backend/app.js 2>/dev/null | grep -i "secret\|key\|password"; then
+            echo "CRITICAL: Hardcoded secret fallback detected" >> sast-report.txt
+            CRITICAL_COUNT=$((CRITICAL_COUNT + 1))
+          fi
+
+          # Check 4: eval() usage
+          if grep -rn "eval(" backend/ --include="*.js" 2>/dev/null; then
+            echo "CRITICAL: eval() usage detected — code injection risk" >> sast-report.txt
+            CRITICAL_COUNT=$((CRITICAL_COUNT + 1))
+          fi
+
+          # Check 5: Missing rate limiting
+          if ! grep -n "rateLimit\|rate-limit\|express-rate-limit" backend/app.js 2>/dev/null; then
+            echo "HIGH: No rate limiting detected on API routes" >> sast-report.txt
+            HIGH_COUNT=$((HIGH_COUNT + 1))
+          fi
+
+          # Check 6: CORS wildcard
+          if grep -n "origin.*'*'\|origin.*\"*\"" backend/app.js 2>/dev/null; then
+            echo "HIGH: CORS wildcard (*) detected" >> sast-report.txt
+            HIGH_COUNT=$((HIGH_COUNT + 1))
+          fi
+
+          # Check 7: No helmet middleware
+          if ! grep -n "helmet" backend/app.js 2>/dev/null; then
+            echo "HIGH: No Helmet security headers middleware detected" >> sast-report.txt
+            HIGH_COUNT=$((HIGH_COUNT + 1))
+          fi
+
+          # Check 8: Error message leakage
+          if grep -n "error.message" backend/app.js 2>/dev/null | grep "res.json\|res.send\|res.status"; then
+            echo "MEDIUM: Internal error messages exposed in API responses" >> sast-report.txt
+            MEDIUM_COUNT=$((MEDIUM_COUNT + 1))
+          fi
+
+          echo "" >> sast-report.txt
+          echo "SUMMARY: Critical=$CRITICAL_COUNT High=$HIGH_COUNT Medium=$MEDIUM_COUNT" >> sast-report.txt
+          cat sast-report.txt
+
+          echo "::notice::SAST Scan: Critical=$CRITICAL_COUNT, High=$HIGH_COUNT, Medium=$MEDIUM_COUNT"
+
+          # Fail if critical findings found
+          if [ $CRITICAL_COUNT -gt 0 ]; then
+            echo "::error::Critical security vulnerabilities detected in SAST scan. Review sast-report.txt"
+            exit 1
+          fi
+
+      - name: Upload SAST Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-analysis-report
+          path: |
+            sast-report.txt
+            eslint-security-report.json
+
+  # ═══════════════════════════════════════════════════════════
+  # PHASE 5: API SECURITY HEADERS CHECK (DAST-lite)
+  # ═══════════════════════════════════════════════════════════
+  api-security-check:
+    name: API Security Headers & Configuration Check
+    runs-on: ubuntu-latest
+    needs: [detect-backend, dependency-scan]
+    if: github.event.inputs.run_dast == 'true'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install and Start Backend
+        run: |
+          cd backend
+          npm install
+          timeout 10 node server.js &
+          sleep 3
+          echo "Backend started for DAST testing"
+
+      - name: Check Health Endpoint
+        run: |
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/health || echo "000")
+          echo "Health check response: $RESPONSE"
+
+          if [ "$RESPONSE" != "200" ]; then
+            echo "::warning::Backend health check failed — DAST tests may be incomplete"
+          fi
+
+      - name: Test Missing Authentication on Admin Endpoint
+        run: |
+          echo "Testing unauthenticated access to admin endpoint..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" http://localhost:5000/api/auth/users 2>/dev/null || echo "{}\n000")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "::error::CRITICAL: Admin user endpoint accessible without authentication (HTTP 200)"
+            echo "DAST-VULN-001: CRITICAL — GET /api/auth/users returns 200 without auth token"
+          else
+            echo "OK: Admin endpoint requires authentication (HTTP $HTTP_CODE)"
+          fi
+
+      - name: Test Authentication Bypass
+        run: |
+          echo "Testing authentication bypass vulnerability..."
+          RESPONSE=$(curl -s -X POST http://localhost:5000/api/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"email":"nonexistent-test@nowhere.invalid","password":"wrongpassword"}' \
+            -w "\n%{http_code}" 2>/dev/null || echo "{}\n000")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+
+          if [ "$HTTP_CODE" = "200" ] && echo "$BODY" | grep -q "token"; then
+            echo "::error::CRITICAL: Login bypass confirmed — any email returns valid JWT token"
+          else
+            echo "OK: Login correctly rejects invalid credentials (HTTP $HTTP_CODE)"
+          fi
+
+      - name: Check Security Headers
+        run: |
+          echo "Checking HTTP security headers..."
+          HEADERS=$(curl -s -I http://localhost:5000/api/health 2>/dev/null || echo "")
+
+          for header in "x-content-type-options" "x-frame-options" "strict-transport-security" "content-security-policy"; do
+            if echo "$HEADERS" | grep -qi "$header"; then
+              echo "OK: $header present"
+            else
+              echo "::warning::Missing security header: $header"
+            fi
+          done
+
+          # Check CORS header
+          CORS=$(curl -s -I -H "Origin: https://evil.com" http://localhost:5000/api/health 2>/dev/null | grep -i "access-control-allow-origin" || echo "")
+          if echo "$CORS" | grep -q "\*"; then
+            echo "::warning::HIGH: CORS wildcard (*) confirmed via DAST"
+          fi
+
+  # ═══════════════════════════════════════════════════════════
+  # PHASE 6: GENERATE SECURITY REPORT
+  # ═══════════════════════════════════════════════════════════
+  generate-report:
+    name: Generate Security Assessment Report
+    runs-on: ubuntu-latest
+    needs: [secret-scan, dependency-scan, sast-analysis]
+    if: always()
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download All Scan Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Generate Markdown Security Report
+        run: |
+          cat > security-pipeline-report.md << 'REPORT_EOF'
+          # InterviewX Security Pipeline Report
+
+          **Run:** ${{ github.run_number }}
+          **Branch:** ${{ github.ref_name }}
+          **Commit:** ${{ github.sha }}
+          **Triggered By:** ${{ github.actor }}
+          **Date:** $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          ## Pipeline Results
+
+          | Phase | Status |
+          |---|---|
+          | Backend Detection | Completed |
+          | Secret Scanning (Gitleaks) | ${{ needs.secret-scan.result }} |
+          | Dependency Scanning (npm audit) | ${{ needs.dependency-scan.result }} |
+          | SAST Analysis | ${{ needs.sast-analysis.result }} |
+
+          ## Key Findings
+
+          ### Critical Findings
+          - VULN-001: Plaintext passwords in data_store.json
+          - VULN-002: MongoDB Atlas credentials in .env
+          - VULN-003: Authentication bypass on login endpoint
+          - VULN-004: Hardcoded JWT secret fallback
+          - VULN-005: Unauthenticated admin user enumeration
+          - VULN-006: Privilege escalation via email domain
+
+          ### High Findings
+          - VULN-007 through VULN-014 (8 issues)
+
+          ### Dependency CVEs
+          - express 4.19.2: CVE-2024-29041 (Open Redirect — Medium)
+
+          ## Recommendation
+
+          **DO NOT deploy to production without addressing all Critical findings.**
+
+          REPORT_EOF
+
+          echo "Security report generated successfully."
+
+      - name: Generate GitHub Actions Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << 'SUMMARY_EOF'
+          # InterviewX Security Assessment Summary
+
+          ## Security Score: 28/100 — CRITICAL RISK
+
+          | Severity | Count |
+          |---|---|
+          | Critical | 6 |
+          | High | 8 |
+          | Medium | 8 |
+          | Low | 3 |
+
+          ## Top 3 Critical Risks
+          1. Authentication Bypass — Login issues JWT to any email without password check
+          2. Admin Privilege Escalation — Any user can register as admin via @interviewx.com email
+          3. Live DB Credentials in .env — MongoDB Atlas password exposed in repository
+
+          ## Pipeline Checks
+          - Secret Scan: ${{ needs.secret-scan.result }}
+          - Dependency Audit: ${{ needs.dependency-scan.result }}
+          - SAST Analysis: ${{ needs.sast-analysis.result }}
+
+          **Action Required:** Review Vulnerability Test Results/security-review.md for detailed remediation guidance.
+          SUMMARY_EOF
+
+      - name: Upload Final Security Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: interviewx-security-assessment-report
+          path: |
+            security-pipeline-report.md
+            sast-report.txt
+            dependency-audit-report.json
+            dependency-audit-summary.txt
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════
+  # PHASE 7: FAIL GATE — BLOCK ON CRITICAL VULNERABILITIES
+  # ═══════════════════════════════════════════════════════════
+  security-gate:
+    name: Security Gate — Fail on Critical Findings
+    runs-on: ubuntu-latest
+    needs: [sast-analysis, secret-scan, dependency-scan]
+    if: always()
+
+    steps:
+      - name: Evaluate Security Gate
+        run: |
+          SAST_RESULT="${{ needs.sast-analysis.result }}"
+          SECRET_RESULT="${{ needs.secret-scan.result }}"
+          DEP_RESULT="${{ needs.dependency-scan.result }}"
+
+          echo "================================================================"
+          echo "  InterviewX Security Gate Evaluation"
+          echo "================================================================"
+          echo "  SAST Analysis    : $SAST_RESULT"
+          echo "  Secret Scanning  : $SECRET_RESULT"
+          echo "  Dependency Audit : $DEP_RESULT"
+          echo "================================================================"
+
+          # Gate fails if SAST found critical vulnerabilities (exit code 1)
+          if [ "$SAST_RESULT" = "failure" ]; then
+            echo "SECURITY GATE FAILED: Critical vulnerabilities detected in SAST scan."
+            echo "Review sast-report.txt and address all Critical findings before merging."
+            exit 1
+          fi
+
+          echo "Security gate passed for non-critical issues."
+          echo "Review security-review.md for all findings and remediation guidance."

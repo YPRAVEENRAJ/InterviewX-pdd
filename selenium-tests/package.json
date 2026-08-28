@@ -1,0 +1,18 @@
+{
+  "name": "interviewx-selenium-tests",
+  "version": "1.0.0",
+  "description": "Selenium WebDriver E2E Automation Test Suite for InterviewX Platform",
+  "main": "tests/login-tests.js",
+  "scripts": {
+    "test:login": "node tests/login-tests.js",
+    "generate:report": "node generate-excel-report.js"
+  },
+  "keywords": ["selenium", "e2e", "testing", "interviewx", "automation"],
+  "author": "Praveen Raj",
+  "license": "MIT",
+  "dependencies": {
+    "selenium-webdriver": "^4.18.0",
+    "chromedriver": "^122.0.0",
+    "xlsx": "^0.18.5"
+  }
+}

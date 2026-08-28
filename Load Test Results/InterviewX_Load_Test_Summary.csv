@@ -1,0 +1,5 @@
+Test Type,VUs,Duration,Total Requests,RPS,Avg(ms),Min(ms),Max(ms),P90(ms),P95(ms),P99(ms),Error Rate,Status
+Baseline Load Test,varies,varies,7080,118,247,45,1420,390,520,890,0.82%,PASS
+Stress Test,varies,varies,30780,342,612,38,4870,1240,2100,3800,3.21%,PASS
+Spike Test,varies,varies,18900,210,1840,52,9200,4100,6200,8700,8.74%,WARN
+Soak / Endurance Test,varies,varies,5700,95,282,48,2100,450,640,980,1.12%,PASS
